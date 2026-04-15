@@ -7,7 +7,7 @@ thats the steps that we are taking to solve this challenge.
 we will use a laptop to simulate the environment.
 we need to simulate Sawyer’s perspective.
 
-Homography Setup: Tape four small dots on table to form a rectangle. This is the "Workspace."
+Homography Setup: Tape four small dots on the table to form a rectangle. This is the "Workspace."
 
 The Code Task: Write a script where you click these four dots on the screen, and OpenCV generates the Bird’s Eye View.
 we want to see the cups from the top, even if the camera is at the side.
