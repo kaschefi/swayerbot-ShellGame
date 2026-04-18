@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-
+from ultralytics import YOLO
 
 class VisionManager:
     def __init__(self, desired_width=500, desired_height=500):
@@ -17,6 +17,12 @@ class VisionManager:
             [self.width, self.height],
             [0, self.height]
         ], dtype="float32")
+        self.model = YOLO("../models/best.pt")
+
+        # Define Orange Color Range (HSV) for the Ping Pong Ball
+        self.orange_lower = np.array([5, 150, 150])
+        self.orange_upper = np.array([15, 255, 255])
+
 
     def click_corner(self, event, x, y, flags, param):
         """Mouse callback to capture 4 corners of the workspace."""
@@ -45,3 +51,46 @@ class VisionManager:
         for pt in self.points:
             cv2.circle(frame, pt, 5, (0, 255, 0), -1)
         return frame
+
+    def detect_ball(self, warped_frame):
+        """Finds the orange ball using color masking."""
+        hsv = cv2.cvtColor(warped_frame, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv, self.orange_lower, self.orange_upper)
+
+        # Clean up noise
+        mask = cv2.erode(mask, None, iterations=2)
+        mask = cv2.dilate(mask, None, iterations=2)
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        if contours:
+            # Get the largest orange blob
+            c = max(contours, key=cv2.contourArea)
+            ((x, y), radius) = cv2.minEnclosingCircle(c)
+            if radius > 5:  # Filter out tiny noise
+                return (int(x), int(y))
+        return None
+
+    def detect_cups(self, warped_frame):
+        """Finds the 3 largest red objects on the table."""
+        hsv = cv2.cvtColor(warped_frame, cv2.COLOR_BGR2HSV)
+
+        # Red is at both ends of the spectrum
+        lower1, upper1 = np.array([0, 100, 100]), np.array([10, 255, 255])
+        lower2, upper2 = np.array([160, 100, 100]), np.array([180, 255, 255])
+
+        mask = cv2.inRange(hsv, lower1, upper1) + cv2.inRange(hsv, lower2, upper2)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        # Sort by area (largest first) and take top 3
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)[:3]
+
+        cups = []
+        for cnt in contours:
+            if cv2.contourArea(cnt) > 400:  # Filter small noise
+                x, y, w, h = cv2.boundingRect(cnt)
+                cups.append({
+                    'box': (x, y, x + w, y + h),
+                    'pos': (int(x + w / 2), y + h)  # Bottom center
+                })
+        return cups
