@@ -17,8 +17,6 @@ class VisionManager:
             [self.width, self.height],
             [0, self.height]
         ], dtype="float32")
-        self.model = YOLO("../models/best.pt")
-
         # Define Orange Color Range (HSV) for the Ping Pong Ball
         self.orange_lower = np.array([5, 150, 150])
         self.orange_upper = np.array([15, 255, 255])
@@ -75,11 +73,16 @@ class VisionManager:
         """Finds the 3 largest red objects on the table."""
         hsv = cv2.cvtColor(warped_frame, cv2.COLOR_BGR2HSV)
 
-        # Red is at both ends of the spectrum
-        lower1, upper1 = np.array([0, 100, 100]), np.array([10, 255, 255])
-        lower2, upper2 = np.array([160, 100, 100]), np.array([180, 255, 255])
+        lower_blue = np.array([100, 100, 50])
+        upper_blue = np.array([130, 255, 255])
 
-        mask = cv2.inRange(hsv, lower1, upper1) + cv2.inRange(hsv, lower2, upper2)
+        mask = cv2.inRange(hsv, lower_blue, upper_blue)
+        cv2.imshow("Blue Mask Debug", mask)
+
+        # Clean up noise (important if the blue is dark)
+        mask = cv2.erode(mask, None, iterations=1)
+        mask = cv2.dilate(mask, None, iterations=2)
+
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         # Sort by area (largest first) and take top 3

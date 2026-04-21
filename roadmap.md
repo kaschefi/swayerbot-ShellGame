@@ -18,10 +18,7 @@ we need to detect two things: The Ball and the Cups.
 The Ball: Since the ball is only visible at the start and end, use a simple Color Mask (HSV thresholding). 
 It’s faster than a neural network and very reliable for a single bright color.
 
-The Cups: Use a lightweight YOLOv10 model.
-
-we probably don't need to train it on "cups" specifically if we use a pre-trained model;
-"bowl" or "cup" is usually already in the COCO dataset.
+The Cups: Use a lightweight YOLOv10 model, or by masking the color of the cups.
 
 The Code Task: Create a script that draws bounding boxes around all 3 cups and the ball simultaneously.
 
