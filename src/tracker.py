@@ -1,80 +1,87 @@
 import numpy as np
-from scipy.optimize import linear_sum_assignment  # Standard for matching
+from scipy.optimize import linear_sum_assignment
 
 
 class Tracker:
     def __init__(self):
-        # We pre-define 3 IDs
-        self.ids = [0, 1, 2]
-        self.tracked_cups = {
-            0: {'pos': None, 'lost_count': 0},
-            1: {'pos': None, 'lost_count': 0},
-            2: {'pos': None, 'lost_count': 0}
+        # always keep exactly 3 slots
+        self.cups = {
+            0: {'pos': None, 'lost_count': 0, 'vel': np.array([0, 0])},
+            1: {'pos': None, 'lost_count': 0, 'vel': np.array([0, 0])},
+            2: {'pos': None, 'lost_count': 0, 'vel': np.array([0, 0])}
         }
         self.winning_id = None
-        self.max_lost_frames = 60  # Remember for 2 seconds at 30fps
 
-    def update(self, detected_centers):
-        # If it's the very first frame, just assign 0, 1, 2 to whatever we see
-        if all(v['pos'] is None for v in self.tracked_cups.values()):
-            for i, pos in enumerate(detected_centers[:3]):
-                self.tracked_cups[i]['pos'] = pos
-            return self.get_active_positions()
+    def update(self, detections):
+        if not detections:
+            for i in range(3): self.cups[i]['lost_count'] += 1
+            return self.get_positions()
 
-        # Create a Distance Matrix
-        # Rows = Our 3 IDs, Cols = New Detections
-        num_dets = len(detected_centers)
-        if num_dets > 0:
-            current_dets = detected_centers[:3]
-            dist_matrix = np.zeros((3, len(current_dets)))
+        # 1. PREDICT (Simple momentum)
+        preds = {}
+        for i in range(3):
+            if self.cups[i]['pos'] is not None:
+                preds[i] = np.array(self.cups[i]['pos']) + self.cups[i]['vel']
+            else:
+                preds[i] = None
 
-            for i in range(3):
-                for j in range(len(current_dets)):
-                    if self.tracked_cups[i]['pos'] is not None:
-                        dist_matrix[i, j] = np.linalg.norm(
-                            np.array(self.tracked_cups[i]['pos']) - np.array(current_dets[j])
-                        )
-                    else:
-                        dist_matrix[i, j] = 9999  # Placeholder for lost cups
+        # MATCHING
+        dist_matrix = np.full((3, len(detections)), 999.0)
+        for i in range(3):
+            if preds[i] is not None:
+                for j, det in enumerate(detections):
+                    dist_matrix[i, j] = np.linalg.norm(preds[i] - det)
 
-            # Use the Hungarian Algorithm to find the best global match
-            row_ind, col_ind = linear_sum_assignment(dist_matrix)
+        row_ind, col_ind = linear_sum_assignment(dist_matrix)
 
-            matched_ids = set()
-            matched_dets = set()
+        matched_ids = set()
+        matched_dets = set()
 
-            for r, c in zip(row_ind, col_ind):
-                # Only match if the distance isn't "teleportation" level
-                # Unless the cup was lost
-                threshold = 200 if self.tracked_cups[r]['lost_count'] > 0 else 100
+        for r, c in zip(row_ind, col_ind):
+            if dist_matrix[r, c] < 150:  # If it's reasonably close, it's a match
+                new_pos = np.array(detections[c])
+                old_pos = np.array(self.cups[r]['pos'])
+                self.cups[r]['vel'] = new_pos - old_pos
+                self.cups[r]['pos'] = tuple(new_pos.astype(int))
+                self.cups[r]['lost_count'] = 0
+                matched_ids.add(r)
+                matched_dets.add(c)
 
-                if dist_matrix[r, c] < threshold:
-                    self.tracked_cups[r]['pos'] = current_dets[c]
-                    self.tracked_cups[r]['lost_count'] = 0
-                    matched_ids.add(r)
-                    matched_dets.add(c)
+        # LEFTOVER RECOVERY
+        # If we have a blob that didn't match, and an ID that is 'lost', FORCE them together
+        unmatched_dets = [d for j, d in enumerate(detections) if j not in matched_dets]
+        lost_ids = [i for i in range(3) if i not in matched_ids]
 
-            # Handle Unmatched IDs (Mark as Lost)
-            for i in range(3):
-                if i not in matched_ids:
-                    self.tracked_cups[i]['lost_count'] += 1
-        else:
-            # No detections at all, increment lost_count for everyone
-            for i in range(3):
-                self.tracked_cups[i]['lost_count'] += 1
+        for det in unmatched_dets:
+            if lost_ids:
+                # Pick the 'most' lost ID or just the first available
+                target_id = lost_ids.pop(0)
+                self.cups[target_id]['pos'] = tuple(np.array(det).astype(int))
+                self.cups[target_id]['lost_count'] = 0
+                self.cups[target_id]['vel'] = np.array([0, 0])
+                matched_ids.add(target_id)
 
-        return self.get_active_positions()
+        # AGEING
+        for i in range(3):
+            if i not in matched_ids:
+                self.cups[i]['lost_count'] += 1
+                # If lost, still apply velocity so it 'ghosts' behind other cups
+                if self.cups[i]['pos'] is not None:
+                    new_ghost_pos = np.array(self.cups[i]['pos']) + self.cups[i]['vel']
+                    self.cups[i]['pos'] = tuple(new_ghost_pos.astype(int))
 
-    def get_active_positions(self):
-        # Only return positions for cups that aren't "permanently" gone
-        return {i: data['pos'] for i, data in self.tracked_cups.items()
-                if data['pos'] is not None and data['lost_count'] < self.max_lost_frames}
+        return self.get_positions()
+
+    def get_positions(self):
+        # We return the position if the cup isn't 'too lost' (2 seconds)
+        return {i: c['pos'] for i, c in self.cups.items() if c['pos'] is not None and c['lost_count'] < 60}
 
     def assign_winner(self, ball_pos):
+        # Find which ID is currently closest to the ball
         min_dist = float('inf')
-        for i, data in self.tracked_cups.items():
-            if data['pos']:
-                dist = np.linalg.norm(np.array(ball_pos) - np.array(data['pos']))
+        for i, c in self.cups.items():
+            if c['pos']:
+                dist = np.linalg.norm(np.array(ball_pos) - np.array(c['pos']))
                 if dist < min_dist:
                     min_dist = dist
                     self.winning_id = i
