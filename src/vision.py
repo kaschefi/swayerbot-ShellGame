@@ -73,10 +73,10 @@ class VisionManager:
         """Finds the 3 largest red objects on the table."""
         hsv = cv2.cvtColor(warped_frame, cv2.COLOR_BGR2HSV)
 
-        lower_blue = np.array([100, 100, 50])
-        upper_blue = np.array([130, 255, 255])
+        lower_green = np.array([35, 100, 100])
+        upper_green = np.array([85, 255, 255])
 
-        mask = cv2.inRange(hsv, lower_blue, upper_blue)
+        mask = cv2.inRange(hsv, lower_green, upper_green)
         cv2.imshow("Blue Mask Debug", mask)
 
         # Clean up noise (important if the blue is dark)

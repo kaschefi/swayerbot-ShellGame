@@ -64,7 +64,7 @@ class Tracker:
         self.winning_id = None
 
     def update(self, detections):
-        # 1. PREDICT
+        # PREDICT
         preds = {}
         for i in range(3):
             if self.cups[i]['pos'] is not None:
@@ -79,7 +79,7 @@ class Tracker:
             else:
                 preds[i] = None
 
-        # 2. MATCHING
+        # MATCHING
         if detections:
             # We use an augmented distance matrix
             dist_matrix = np.full((3, len(detections)), 999.0)
@@ -116,7 +116,7 @@ class Tracker:
                 if dist_matrix[r, c] < self.dist_threshold:
                     det_pos = np.array(detections[c])
 
-                    # 3. UPDATE
+                    # UPDATE
                     if self.cups[r]['pos'] is not None:
                         # KF Update
                         smoothed_pos = self.cups[r]['kf'].update(det_pos)
@@ -132,7 +132,7 @@ class Tracker:
                     matched_ids.add(r)
                     matched_dets.add(c)
 
-            # 4. RECOVERY & TETHERING
+            #  RECOVERY & TETHERING
             unmatched_dets = [d for j, d in enumerate(detections) if j not in matched_dets]
             lost_ids = [i for i in range(3) if i not in matched_ids]
 
