@@ -1,7 +1,5 @@
-# --- ADD THESE IMPORTS AT THE TOP ---
 import rospy
 from src.sawyer_interface import SawyerInterface
-# ------------------------------------
 
 import cv2
 import numpy as np
@@ -11,9 +9,11 @@ from src.tracker import Tracker
 # Initialize ROS node for Intera SDK interaction
 rospy.init_node("sawyer_shell_game_vision")
 
+# Set clean loop timing constraint (20Hz control execution)
+rate = rospy.Rate(20)
+
 cap = cv2.VideoCapture(0)
 # Open secondary video capture for the wrist camera
-# (0 is typically built-in or external webcam, 1 or 2 is usually the wrist)
 wrist_cap = cv2.VideoCapture(1)
 
 vm = VisionManager()
@@ -69,22 +69,20 @@ while not rospy.is_shutdown():  # Clean ROS loop hook
                 if success:
                     state = "ROBOT_DESCENT"
                 else:
+                    robot.stop()
                     state = "IDLE"
             else:
                 print("Cannot reveal: Cup lost from top-down tracker view.")
+                robot.stop()
                 state = "IDLE"
 
         # Phase 2 Execution (Visual Servoing)
         if state == "ROBOT_DESCENT":
             ret_w, w_frame = wrist_cap.read()
             if ret_w:
-                # Reuse your color mask/contour system tuned for the wrist frame view
-                # Pass your wrist frame through your cup detector
                 wrist_cups = vm.detect_cups(w_frame)
 
                 if wrist_cups:
-                    # When hovering directly over, the closest or largest cup in the
-                    # wrist view will step-correct directly to the center
                     target_cup_wrist = wrist_cups[0]['pos']
 
                     # Draw a dot over what the wrist sees for debugging
@@ -94,12 +92,22 @@ while not rospy.is_shutdown():  # Clean ROS loop hook
                     # Run a visual servoing iteration step
                     finished = robot.visual_servoing_step(target_cup_wrist)
                     if finished:
-                        state = "IDLE"  # Goal reached, return to idle
+                        state = "RETRACTING"  # Goal reached, trigger retraction
                 else:
                     # Safe Halt condition: if the cup disappears out of frame, freeze
                     robot.visual_servoing_step(None)
             else:
+                robot.stop()
                 state = "IDLE"
+
+        # Safe Clearance Height Reset Phase
+        if state == "RETRACTING":
+            success = robot.retract()
+            if success:
+                print("Retraction complete. Workspace clear.")
+            else:
+                print("[Warning] Retraction execution failed or interrupted.")
+            state = "IDLE"
 
         # --- DRAW VISUALIZATIONS ---
         if ball_pos:
@@ -122,11 +130,14 @@ while not rospy.is_shutdown():  # Clean ROS loop hook
 
     # --- KEYBOARD COMMANDS ---
     key = cv2.waitKey(1) & 0xFF
-    if key == ord('q'): break
+    if key == ord('q'):
+        robot.stop()
+        break
     if key == ord('r'):
-        vm.points = [];
+        robot.stop()
+        vm.points = []
         vm.homography_matrix = None
-        state = "CALIBRATING";
+        state = "CALIBRATING"
         winning_id = None
         print("Resetting...")
 
@@ -137,10 +148,13 @@ while not rospy.is_shutdown():  # Clean ROS loop hook
     if key == ord('x') and state == "IDLE":
         state = "LOCKED"
 
-    # New hook: Press 'e' when shuffling is completely finished to execute point movement
+    # Press 'e' when shuffling is completely finished to execute point movement
     if key == ord('e') and state == "TRACKING":
         state = "REVEALING"
         print("Shuffle finished! Directing Sawyer to winning cup...")
+
+    # Maintain loop frequency to avoid overflowing control stack
+    rate.sleep()
 
 cap.release()
 wrist_cap.release()
