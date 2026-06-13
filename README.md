@@ -61,7 +61,7 @@ cd ~/ros_ws && . ./intera.sh && rosparam set /use_sim_time true && roslaunch saw
 **Terminal 4 (Game Controller Node):**
 Launch the shuffle node:
 ```bash
-cd ~/ros_ws && . ./intera.sh && python3 src/gazebo_game_controller.py
+cd ~/ros_ws && . ./intera.sh && python3 src/shuffle_cups.py
 ```
 
 **Terminal 5 (Master Script):**
