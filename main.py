@@ -6,15 +6,39 @@ import numpy as np
 from src.vision import VisionManager
 from src.tracker import Tracker
 
+# New imports to receive camera streams over the ROS network link
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge, CvBridgeError
+
 # Initialize ROS node for Intera SDK interaction
 rospy.init_node("sawyer_shell_game_vision")
 
 # Set clean loop timing constraint (20Hz control execution)
 rate = rospy.Rate(20)
 
-cap = cv2.VideoCapture(0)
-# Open secondary video capture for the wrist camera
-wrist_cap = cv2.VideoCapture(1)
+# Initialize CV Bridge for ROS-to-OpenCV frame conversion
+bridge = CvBridge()
+latest_head_frame = None
+latest_wrist_frame = None
+
+# Callback loops to capture network frames asynchronously
+def head_camera_callback(msg):
+    global latest_head_frame
+    try:
+        latest_head_frame = bridge.imgmsg_to_cv2(msg, "bgr8")
+    except CvBridgeError as e:
+        rospy.logerr(f"Head Camera Bridge Error: {e}")
+
+def wrist_camera_callback(msg):
+    global latest_wrist_frame
+    try:
+        latest_wrist_frame = bridge.imgmsg_to_cv2(msg, "bgr8")
+    except CvBridgeError as e:
+        rospy.logerr(f"Wrist Camera Bridge Error: {e}")
+
+# Subscribe directly to Sawyer's internal image topics over the network link
+rospy.Subscriber("/io/internal_camera/head_camera/image_raw", Image, head_camera_callback)
+rospy.Subscriber("/io/internal_camera/right_hand_camera/image_raw", Image, wrist_camera_callback)
 
 vm = VisionManager()
 tracker = Tracker()
@@ -30,8 +54,12 @@ cv2.setMouseCallback("Original", vm.click_corner)
 print("--- SAWYER SHELL GAME: BOOTING UP ---")
 
 while not rospy.is_shutdown():  # Clean ROS loop hook
-    ret, frame = cap.read()
-    if not ret: break
+    # Wait until the network streams the first frame over the topic
+    if latest_wrist_frame is None:
+        rate.sleep()
+        continue
+
+    frame = latest_wrist_frame.copy()
 
     display_frame = vm.draw_points(frame.copy())
     cv2.imshow("Original", display_frame)
@@ -78,8 +106,8 @@ while not rospy.is_shutdown():  # Clean ROS loop hook
 
         # Phase 2 Execution (Visual Servoing)
         if state == "ROBOT_DESCENT":
-            ret_w, w_frame = wrist_cap.read()
-            if ret_w:
+            if latest_wrist_frame is not None:
+                w_frame = latest_wrist_frame.copy()
                 wrist_cups = vm.detect_cups(w_frame)
 
                 if wrist_cups:
@@ -156,6 +184,4 @@ while not rospy.is_shutdown():  # Clean ROS loop hook
     # Maintain loop frequency to avoid overflowing control stack
     rate.sleep()
 
-cap.release()
-wrist_cap.release()
 cv2.destroyAllWindows()
